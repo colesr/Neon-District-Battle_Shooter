@@ -283,6 +283,7 @@
     <div class="hud-item">SHIELD: <span id="shield-display">0</span></div>
     <div class="hud-item">ARMOR: <span id="armor-display">0</span></div>
     <div class="hud-item">MULTISHOT: <span id="multishot-display">1</span>x</div>
+    <div class="hud-item" style="border-left-color:#ffaa00;">🔫 GANG: <span id="gang-display">0</span></div>
   </div>
   
   <!-- Health Bar -->
@@ -455,6 +456,7 @@ function connectToServer(playerName) {
       document.getElementById('shield-display').textContent = Math.floor(me.shield || 0);
       document.getElementById('armor-display').textContent = me.armor || 0;
       document.getElementById('multishot-display').textContent = me.multishot || 1;
+      document.getElementById('gang-display').textContent = me.gang ? me.gang.length : 0;
       
       // Update health bar
       const healthPct = (me.health / me.maxHealth) * 100;
@@ -483,11 +485,35 @@ function connectToServer(playerName) {
   socket.on('player_killed', (data) => {
     addKillMessage(data);
     
+    // Check if we got a gang member!
+    if (data.killerId === myPlayerId && data.gangSize) {
+      showGangNotification(data.gangSize);
+    }
+    
     // Check if we died
     if (data.killedId === myPlayerId) {
       showDeathScreen(data.killerName);
     }
   });
+  
+  function showGangNotification(gangSize) {
+    const notif = document.createElement('div');
+    notif.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:32px; font-weight:900; color:#ffaa00; text-shadow:0 0 30px #ffaa00; z-index:100; animation:gangPop 1s ease forwards;';
+    notif.textContent = `🔫 +1 GANG MEMBER! (${gangSize})`;
+    document.body.appendChild(notif);
+    setTimeout(() => notif.remove(), 1000);
+  }
+  
+  // Add CSS animation for gang notification
+  const gangStyle = document.createElement('style');
+  gangStyle.textContent = `
+    @keyframes gangPop {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(0.8); }
+      50% { transform: translate(-50%, -50%) scale(1.2); }
+      100% { opacity: 0; transform: translate(-50%, -70%) scale(0.9); }
+    }
+  `;
+  document.head.appendChild(gangStyle);
   
   socket.on('respawned', (data) => {
     document.getElementById('death-screen').classList.remove('show');
@@ -822,6 +848,39 @@ function render() {
     const isMe = id === myPlayerId;
     let color = isMe ? '#00ffcc' : '#ff2d78';
     const size = 20 + p.powerLevel * 2;
+    
+    // DRAW GANG MEMBERS FIRST (behind the leader)
+    if (p.gang && p.gang.length > 0) {
+      p.gang.forEach((member, i) => {
+        const gangSize = 18; // Slightly smaller than leader
+        const gangColor = isMe ? 'rgba(0,255,204,0.7)' : 'rgba(255,45,120,0.7)';
+        
+        // Gang member ship
+        ctx.save();
+        ctx.translate(member.x, member.y);
+        ctx.rotate(member.angle);
+        
+        ctx.fillStyle = gangColor;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.moveTo(gangSize, 0);
+        ctx.lineTo(-gangSize/2, -gangSize/2);
+        ctx.lineTo(-gangSize/3, 0);
+        ctx.lineTo(-gangSize/2, gangSize/2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        
+        ctx.restore();
+        
+        // Gang member number
+        ctx.fillStyle = color;
+        ctx.font = '9px Orbitron';
+        ctx.textAlign = 'center';
+        ctx.fillText(`#${i+1}`, member.x, member.y - gangSize - 5);
+      });
+    }
     
     // Visual effects for power states
     if (p.invincible > 0) {
