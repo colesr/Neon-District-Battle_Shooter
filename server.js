@@ -363,51 +363,6 @@ setInterval(() => {
   // Update all players
   players.forEach(player => player.update(dt));
 
-  // Gang members shoot automatically at nearby enemies!
-  players.forEach(player => {
-    if (!player.alive || player.gang.length === 0) return;
-    
-    player.gang.forEach((member, memberIndex) => {
-      // Each gang member shoots at nearby enemies
-      const now = Date.now();
-      if (now - member.lastShot < 500) return; // Gang shoots slower (500ms)
-      
-      // Find nearest enemy
-      let nearestEnemy = null;
-      let nearestDist = 400; // Shoot range
-      
-      players.forEach(enemy => {
-        if (!enemy.alive || enemy.id === player.id) return;
-        const dx = enemy.x - member.x;
-        const dy = enemy.y - member.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestEnemy = enemy;
-        }
-      });
-      
-      // Shoot at nearest enemy
-      if (nearestEnemy) {
-        member.lastShot = now;
-        const angle = Math.atan2(nearestEnemy.y - member.y, nearestEnemy.x - member.x);
-        const speed = 20;
-        
-        const bullet = new Bullet(
-          bulletIdCounter++,
-          player.id, // Bullet belongs to the player
-          member.x,
-          member.y,
-          Math.cos(angle) * speed,
-          Math.sin(angle) * speed
-        );
-        bullet.damage = player.damage; // Use player's damage
-        bullets.set(bullet.id, bullet);
-      }
-    });
-  });
-
   // Update all bullets
   bullets.forEach((bullet, id) => {
     const alive = bullet.update(dt);
@@ -586,6 +541,23 @@ io.on('connection', (socket) => {
         bullet.damage = damage;
         bullets.set(bullet.id, bullet);
       }
+    }
+    
+    // GANG SHOOTS IN SAME DIRECTION AS PLAYER!
+    if (player.gang && player.gang.length > 0) {
+      player.gang.forEach((member) => {
+        // Each gang member shoots in the SAME direction as the leader
+        const gangBullet = new Bullet(
+          bulletIdCounter++,
+          socket.id, // Belongs to player
+          member.x,
+          member.y,
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed
+        );
+        gangBullet.damage = damage; // Same damage as player
+        bullets.set(gangBullet.id, gangBullet);
+      });
     }
   });
 
