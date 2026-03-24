@@ -59,14 +59,23 @@ class Player {
     this.multishot = 1; // Number of bullets per shot
     this.invincible = 0; // Frames of invincibility
     this.megaDamage = 0; // Frames of mega damage
+    
+    // Kill streak system
+    this.killStreak = 0;
+    this.killStreakBonuses = {
+      speed: 0,
+      damage: 0,
+      fireRate: 0
+    };
   }
 
   update(dt) {
     if (!this.alive) return;
     
-    // Apply velocity
-    this.x += this.vx * dt * this.speed;
-    this.y += this.vy * dt * this.speed;
+    // Apply velocity with kill streak speed bonus
+    const speedMultiplier = 1 + this.killStreakBonuses.speed;
+    this.x += this.vx * dt * this.speed * speedMultiplier;
+    this.y += this.vy * dt * this.speed * speedMultiplier;
     
     // Keep in bounds
     const margin = WORLD_SIZE / 2;
@@ -76,6 +85,36 @@ class Player {
     // Decay temporary effects
     if (this.invincible > 0) this.invincible--;
     if (this.megaDamage > 0) this.megaDamage--;
+  }
+
+  addKill() {
+    this.kills++;
+    this.killStreak++;
+    
+    // Apply kill streak bonuses
+    if (this.killStreak >= 3) {
+      this.killStreakBonuses.speed = 0.2; // 20% speed boost
+    }
+    if (this.killStreak >= 5) {
+      this.killStreakBonuses.damage = 10; // +10 damage
+    }
+    if (this.killStreak >= 7) {
+      this.invincible = 180; // 3 seconds invincibility
+    }
+    if (this.killStreak >= 10) {
+      // LEGENDARY - mega rewards
+      this.maxHealth += 50;
+      this.health = this.maxHealth;
+      this.multishot = Math.max(this.multishot, 5);
+      this.megaDamage = 600; // 10 seconds
+    }
+  }
+
+  die() {
+    this.alive = false;
+    // Reset kill streak bonuses
+    this.killStreak = 0;
+    this.killStreakBonuses = { speed: 0, damage: 0, fireRate: 0 };
   }
 
   takeDamage(damage, killerId) {
@@ -96,7 +135,7 @@ class Player {
     }
     
     if (this.health <= 0) {
-      this.alive = false;
+      this.die();
       return killerId; // Return killer ID
     }
     return null;
@@ -111,6 +150,8 @@ class Player {
     this.vy = 0;
     this.shield = 0;
     this.invincible = 180; // 3 seconds spawn protection
+    this.killStreak = 0;
+    this.killStreakBonuses = { speed: 0, damage: 0, fireRate: 0 };
   }
 
   powerUp() {
@@ -177,6 +218,13 @@ class Player {
     }
   }
 
+  getCurrentDamage() {
+    let baseDamage = this.damage;
+    baseDamage += this.killStreakBonuses.damage;
+    if (this.megaDamage > 0) baseDamage *= 3;
+    return baseDamage;
+  }
+
   serialize() {
     return {
       id: this.id,
@@ -195,7 +243,8 @@ class Player {
       xp: this.xp,
       multishot: this.multishot,
       invincible: this.invincible,
-      megaDamage: this.megaDamage
+      megaDamage: this.megaDamage,
+      killStreak: this.killStreak
     };
   }
 }
@@ -350,14 +399,26 @@ setInterval(() => {
           const killer = players.get(killerId);
           if (killer) {
             killer.score += 100;
-            killer.kills++;
+            killer.addKill();  // Use new addKill method (handles kill streaks)
             killer.powerUp();
             
             io.emit('player_killed', {
               killedId: player.id,
               killerId: killerId,
-              killerName: killer.name
+              killerName: killer.name,
+              killStreak: killer.killStreak
             });
+            
+            // Announce kill streaks
+            if (killer.killStreak === 3) {
+              io.emit('kill_streak', { playerId: killerId, playerName: killer.name, streak: 3, title: 'ON FIRE!' });
+            } else if (killer.killStreak === 5) {
+              io.emit('kill_streak', { playerId: killerId, playerName: killer.name, streak: 5, title: 'UNSTOPPABLE!' });
+            } else if (killer.killStreak === 7) {
+              io.emit('kill_streak', { playerId: killerId, playerName: killer.name, streak: 7, title: 'GODLIKE!' });
+            } else if (killer.killStreak === 10) {
+              io.emit('kill_streak', { playerId: killerId, playerName: killer.name, streak: 10, title: 'LEGENDARY!' });
+            }
           }
         }
       }
@@ -379,18 +440,25 @@ setInterval(() => {
         
         // Special: Nuke kills all nearby players
         if (powerup.type === 'nuke') {
+          let nukeKills = 0;
           players.forEach(otherPlayer => {
             if (otherPlayer.id === player.id || !otherPlayer.alive) return;
             const ndx = player.x - otherPlayer.x;
             const ndy = player.y - otherPlayer.y;
             const ndist = Math.sqrt(ndx*ndx + ndy*ndy);
             if (ndist < 500) { // Nuke radius
-              otherPlayer.takeDamage(999, player.id);
-              player.score += 100;
-              player.kills++;
-              player.powerUp();
+              const killed = otherPlayer.takeDamage(999, player.id);
+              if (killed) {
+                player.score += 100;
+                player.addKill();
+                player.powerUp();
+                nukeKills++;
+              }
             }
           });
+          if (nukeKills > 0) {
+            io.emit('nuke_explosion', { playerId: player.id, playerName: player.name, kills: nukeKills });
+          }
         }
         
         powerups.delete(id);
@@ -469,7 +537,7 @@ io.on('connection', (socket) => {
     // Create bullets based on multishot
     const speed = 20;
     const angle = data.angle;
-    const damage = player.megaDamage > 0 ? player.damage * 3 : player.damage;
+    const damage = player.getCurrentDamage(); // Includes kill streak bonuses
     
     if (player.multishot === 1) {
       // Single shot
