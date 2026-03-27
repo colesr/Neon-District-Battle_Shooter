@@ -663,9 +663,16 @@ document.getElementById('resume-btn').addEventListener('click', () => {
 document.getElementById('quit-btn').addEventListener('click', () => {
   paused = false;
   document.getElementById('pause-screen').classList.remove('show');
+  document.getElementById('death-screen').classList.remove('show');
   if (socket) socket.disconnect();
   socket = null;
   myPlayerId = null;
+  players.clear();
+  bullets.clear();
+  powerups.clear();
+  playerTrails.clear();
+  particles.length = 0;
+  document.getElementById('weapon-bar').innerHTML = '';
   document.getElementById('join-screen').classList.remove('hidden');
 });
 
@@ -866,6 +873,8 @@ function connectToServer(playerName) {
   
   socket.on('respawned', (data) => {
     document.getElementById('death-screen').classList.remove('show');
+    paused = false;
+    document.getElementById('pause-screen').classList.remove('show');
   });
   
   socket.on('powerup_collected', (data) => {
@@ -944,8 +953,8 @@ function showPowerupNotification(text) {
 
 // Input handling
 window.addEventListener('keydown', (e) => {
-  // ESC toggles pause
-  if (e.key === 'Escape' && socket && myPlayerId) {
+  // ESC toggles pause (not while on death screen)
+  if (e.key === 'Escape' && socket && myPlayerId && !document.getElementById('death-screen').classList.contains('show')) {
     paused = !paused;
     document.getElementById('pause-screen').classList.toggle('show', paused);
     if (paused) Object.keys(keys).forEach(k => keys[k] = false);
@@ -988,8 +997,8 @@ canvas.addEventListener('mousemove', (e) => {
 });
 
 canvas.addEventListener('mousedown', () => {
+  if (paused) return;
   shooting = true;
-  // Visual feedback
   screenShake = 3;
   chromatic = 2;
 });
@@ -1102,12 +1111,18 @@ function render() {
   drawTrippyGrid();
   
   // Draw particles (explosions, shell casings)
-  particles.forEach((p, i) => {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
     p.life--;
     p.x += p.vx;
     p.y += p.vy;
     p.vy += 0.2; // Gravity
-    
+
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+
     const alpha = p.life / p.maxLife;
     ctx.fillStyle = p.color;
     ctx.globalAlpha = alpha;
@@ -1118,9 +1133,7 @@ function render() {
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
-    
-    if (p.life <= 0) particles.splice(i, 1);
-  });
+  }
   
   // Draw powerups
   powerups.forEach(p => {
@@ -1535,7 +1548,7 @@ function drawTrippyGrid() {
 
 function updateLeaderboard() {
   const sorted = Array.from(players.values())
-    .filter(p => p.alive)
+    .filter(p => p.alive && !p.isAI)
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
   

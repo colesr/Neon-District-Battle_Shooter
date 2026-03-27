@@ -91,6 +91,7 @@ class AIEnemy {
     this.shootTimer = 0;
     this.state = 'roam'; // roam, chase, flee
     this.targetId = null;
+    this.empSlowed = 0;
   }
 
   update(dt) {
@@ -98,6 +99,7 @@ class AIEnemy {
 
     this.changeTimer--;
     this.shootTimer--;
+    if (this.empSlowed > 0) this.empSlowed--;
 
     // Find nearest player
     let nearestPlayer = null;
@@ -140,7 +142,8 @@ class AIEnemy {
     this.angle += angleDiff * 0.05;
 
     // Move
-    const moveSpeed = this.state === 'flee' ? this.speed * 1.3 : this.speed;
+    const empMult = this.empSlowed > 0 ? 0.3 : 1.0;
+    const moveSpeed = (this.state === 'flee' ? this.speed * 1.3 : this.speed) * empMult;
     this.vx = Math.cos(this.angle) * moveSpeed;
     this.vy = Math.sin(this.angle) * moveSpeed;
     this.x += this.vx * dt;
@@ -788,6 +791,8 @@ setInterval(() => {
       aiEnemies.forEach(ai => {
         if (bulletConsumed) return;
         if (!ai.alive || ai.id === bullet.playerId) return;
+        // Prevent AI friendly fire — AI bullets can't hit other AI
+        if (typeof bullet.playerId === 'string' && bullet.playerId.startsWith('ai_')) return;
 
         const dx = bullet.x - ai.x;
         const dy = bullet.y - ai.y;
@@ -833,9 +838,11 @@ setInterval(() => {
       const dist = Math.sqrt(dx*dx + dy*dy);
 
       if (dist < 40) {
+        // Prevent two players collecting same powerup
+        if (!powerups.has(id)) return;
         player.applyPowerup(powerup.type, powerup.value);
 
-        // Nuke kills all nearby players
+        // Nuke kills all nearby players and AI
         if (powerup.type === 'nuke') {
           players.forEach(otherPlayer => {
             if (otherPlayer.id === player.id || !otherPlayer.alive) return;
@@ -848,6 +855,20 @@ setInterval(() => {
               player.kills++;
               player.totalKills++;
               player.powerUp();
+            }
+          });
+          // Nuke also kills AI enemies
+          aiEnemies.forEach(ai => {
+            if (!ai.alive) return;
+            const ndx = player.x - ai.x;
+            const ndy = player.y - ai.y;
+            const ndist = Math.sqrt(ndx*ndx + ndy*ndy);
+            if (ndist < 500) {
+              dropAILoot(ai.x, ai.y);
+              ai.alive = false;
+              player.score += 50;
+              player.kills++;
+              player.totalKills++;
             }
           });
         }
@@ -1001,7 +1022,7 @@ io.on('connection', (socket) => {
     const result = player.useAbility();
     if (!result) return;
 
-    // Handle EMP effect on other players
+    // Handle EMP effect on other players and AI
     if (result.type === 'emp') {
       players.forEach(otherPlayer => {
         if (otherPlayer.id === player.id || !otherPlayer.alive) return;
@@ -1010,6 +1031,15 @@ io.on('connection', (socket) => {
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist < result.radius) {
           otherPlayer.empSlowed = ABILITIES.emp.duration;
+        }
+      });
+      aiEnemies.forEach(ai => {
+        if (!ai.alive) return;
+        const dx = player.x - ai.x;
+        const dy = player.y - ai.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < result.radius) {
+          ai.empSlowed = ABILITIES.emp.duration;
         }
       });
     }
