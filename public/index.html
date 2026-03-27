@@ -180,7 +180,7 @@
       align-items:center;
       justify-content:center;
       flex-direction:column;
-      z-index:50;
+      z-index:150;
     }
     #death-screen.show { display:flex; }
     .death-title {
@@ -762,7 +762,7 @@ function connectToServer(playerName) {
 
       // Update weapon inventory bar
       const weaponBar = document.getElementById('weapon-bar');
-      const inv = me.weaponInventory || [{ type: 'default', ammo: Infinity }];
+      const inv = (me.weaponInventory && me.weaponInventory.length > 0) ? me.weaponInventory : [{ type: 'default', ammo: Infinity }];
       const activeIdx = me.weaponIndex || 0;
       if (inv.length !== weaponBar.childElementCount || weaponBar.dataset.hash !== JSON.stringify(inv.map(w => w.type + w.ammo))) {
         weaponBar.dataset.hash = JSON.stringify(inv.map(w => w.type + w.ammo));
@@ -948,6 +948,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && socket && myPlayerId) {
     paused = !paused;
     document.getElementById('pause-screen').classList.toggle('show', paused);
+    if (paused) Object.keys(keys).forEach(k => keys[k] = false);
     shooting = false;
     return;
   }
@@ -972,8 +973,8 @@ window.addEventListener('keydown', (e) => {
 
 // Weapon switching with scroll wheel
 canvas.addEventListener('wheel', (e) => {
-  if (!socket || !myPlayerId || paused) return;
   e.preventDefault();
+  if (!socket || !myPlayerId || paused) return;
   socket.emit('switch_weapon', { direction: e.deltaY > 0 ? 'next' : 'prev' });
 }, { passive: false });
 
@@ -1296,6 +1297,7 @@ function render() {
 
     // Cloaked players: invisible to enemies, ghost to self
     if (p.cloaked && id !== myPlayerId) return;
+    ctx.save();
     if (p.cloaked) ctx.globalAlpha = 0.3;
 
     const isMe = id === myPlayerId;
@@ -1402,8 +1404,7 @@ function render() {
       ctx.fillRect(p.x - barWidth/2, shieldBarY, barWidth * shieldPct, 3);
     }
 
-    // Reset alpha after cloaked player
-    ctx.globalAlpha = 1;
+    ctx.restore();
   });
   
   ctx.restore();

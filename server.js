@@ -412,7 +412,8 @@ class Player {
       this.weaponInventory.push({ type: weaponType, ammo: WEAPONS[weaponType].ammo });
     }
     // Switch to the new weapon
-    this.weaponIndex = this.weaponInventory.findIndex(w => w.type === weaponType);
+    const idx = this.weaponInventory.findIndex(w => w.type === weaponType);
+    this.weaponIndex = idx >= 0 ? idx : 0;
     this.weapon = weaponType;
     this.weaponAmmo = WEAPONS[weaponType].ammo;
   }
@@ -728,8 +729,14 @@ setInterval(() => {
   // Update all players
   players.forEach(player => player.update(dt));
 
-  // Update all AI enemies
-  aiEnemies.forEach(ai => ai.update(dt));
+  // Update all AI enemies and remove dead ones
+  aiEnemies.forEach((ai, id) => {
+    if (!ai.alive) {
+      aiEnemies.delete(id);
+      return;
+    }
+    ai.update(dt);
+  });
 
   // Update all bullets
   bullets.forEach((bullet, id) => {
@@ -739,8 +746,11 @@ setInterval(() => {
       return;
     }
 
+    let bulletConsumed = false;
+
     // Check bullet collision with players
     players.forEach(player => {
+      if (bulletConsumed) return;
       if (!player.alive || player.id === bullet.playerId) return;
       if (player.cloaked) return;
 
@@ -749,6 +759,7 @@ setInterval(() => {
       const dist = Math.sqrt(dx*dx + dy*dy);
 
       if (dist < 30) {
+        bulletConsumed = true;
         const killerId = player.takeDamage(bullet.damage, bullet.playerId);
         bullets.delete(id);
 
@@ -772,42 +783,44 @@ setInterval(() => {
       }
     });
 
-    // Check bullet collision with AI enemies
-    aiEnemies.forEach(ai => {
-      if (!ai.alive || ai.id === bullet.playerId) return;
+    // Check bullet collision with AI enemies (only if bullet wasn't already consumed)
+    if (!bulletConsumed) {
+      aiEnemies.forEach(ai => {
+        if (bulletConsumed) return;
+        if (!ai.alive || ai.id === bullet.playerId) return;
 
-      const dx = bullet.x - ai.x;
-      const dy = bullet.y - ai.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+        const dx = bullet.x - ai.x;
+        const dy = bullet.y - ai.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < 30) {
-        const killerId = ai.takeDamage(bullet.damage, bullet.playerId);
-        bullets.delete(id);
+        if (dist < 30) {
+          bulletConsumed = true;
+          const killerId = ai.takeDamage(bullet.damage, bullet.playerId);
+          bullets.delete(id);
 
-        if (killerId) {
-          // Drop loot at AI death location
-          dropAILoot(ai.x, ai.y);
-          aiEnemies.delete(ai.id);
+          if (killerId) {
+            dropAILoot(ai.x, ai.y);
+            aiEnemies.delete(ai.id);
 
-          // Award killer (if it's a player)
-          const killer = players.get(killerId);
-          if (killer) {
-            killer.score += 50;
-            killer.kills++;
-            killer.totalKills++;
+            const killer = players.get(killerId);
+            if (killer) {
+              killer.score += 50;
+              killer.kills++;
+              killer.totalKills++;
 
-            io.emit('player_killed', {
-              killedId: ai.id,
-              killerId: killerId,
-              killerName: killer.name,
-              killedName: ai.name,
-              gangSize: killer.gang.length,
-              wasAI: true
-            });
+              io.emit('player_killed', {
+                killedId: ai.id,
+                killerId: killerId,
+                killerName: killer.name,
+                killedName: ai.name,
+                gangSize: killer.gang.length,
+                wasAI: true
+              });
+            }
           }
         }
-      }
-    });
+      });
+    }
   });
 
   // Check powerup collection
@@ -907,9 +920,9 @@ io.on('connection', (socket) => {
   socket.on('input', (data) => {
     const player = players.get(socket.id);
     if (!player || !player.alive) return;
-    player.vx = data.vx || 0;
-    player.vy = data.vy || 0;
-    player.angle = data.angle || 0;
+    player.vx = Number(data.vx) || 0;
+    player.vy = Number(data.vy) || 0;
+    player.angle = Number(data.angle) || 0;
   });
 
   socket.on('shoot', (data) => {
@@ -930,7 +943,7 @@ io.on('connection', (socket) => {
     }
 
     const speed = weaponDef.speed;
-    const angle = data.angle;
+    const angle = typeof data.angle === 'number' ? data.angle : player.angle;
     let baseDamage = player.megaDamage > 0 ? player.damage * 3 : player.damage;
     baseDamage *= weaponDef.damageMult;
 
