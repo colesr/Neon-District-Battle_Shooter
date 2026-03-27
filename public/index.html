@@ -1244,7 +1244,7 @@ function render() {
       ctx.shadowColor = bulletGlowColor;
       ctx.shadowBlur = 20 * alpha;
       ctx.beginPath();
-      ctx.arc(trailX, trailY, wStyle.size - i * 0.5, 0, Math.PI*2);
+      ctx.arc(trailX, trailY, Math.max(0.5, wStyle.size - i * 0.5), 0, Math.PI*2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -1571,7 +1571,7 @@ function updateLeaderboard() {
 function addKillMessage(data) {
   const msg = document.createElement('div');
   msg.className = 'kill-msg';
-  const victimName = data.wasAI ? data.killedName : 'a player';
+  const victimName = data.killedName || (data.wasAI ? 'a bot' : 'a player');
   msg.textContent = `${data.killerName} eliminated ${victimName}`;
   document.getElementById('kill-feed').appendChild(msg);
   

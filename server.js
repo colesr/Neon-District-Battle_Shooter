@@ -379,12 +379,22 @@ class Player {
   respawn() {
     this.x = Math.random() * WORLD_SIZE - WORLD_SIZE/2;
     this.y = Math.random() * WORLD_SIZE - WORLD_SIZE/2;
-    this.health = this.maxHealth;
     this.alive = true;
     this.vx = 0;
     this.vy = 0;
+    // Reset all combat stats to base
+    this.health = 100;
+    this.maxHealth = 100;
+    this.speed = 5;
+    this.fireRate = 200;
+    this.damage = 20;
+    this.powerLevel = 1;
     this.shield = 0;
+    this.armor = 0;
+    this.multishot = 1;
+    this.xp = 0;
     this.invincible = 180;
+    this.megaDamage = 0;
     this.gang = [];
     this.gangTrail = [];
     this.weapon = 'default';
@@ -511,7 +521,7 @@ class Player {
         break;
       case 'mega_damage':
         this.megaDamage = 600;
-        this.damage *= 3;
+        // Damage boost applied dynamically in shoot handler, not permanently
         break;
       case 'nuke':
         // Handled in game loop
@@ -653,7 +663,7 @@ class Powerup {
       // Common (55% chance)
       'health_small': 20,
       'health_medium': 40,
-      'energy': 1,
+      'energy': 50,
       'shield': 25,
       'xp': 50,
 
@@ -850,11 +860,21 @@ setInterval(() => {
             const ndy = player.y - otherPlayer.y;
             const ndist = Math.sqrt(ndx*ndx + ndy*ndy);
             if (ndist < 500) {
-              otherPlayer.takeDamage(999, player.id);
-              player.score += 100;
-              player.kills++;
-              player.totalKills++;
-              player.powerUp();
+              const wasKilled = otherPlayer.takeDamage(999, player.id);
+              if (wasKilled) {
+                player.score += 100;
+                player.kills++;
+                player.totalKills++;
+                player.powerUp();
+                player.addGangMember();
+                io.emit('player_killed', {
+                  killedId: otherPlayer.id,
+                  killerId: player.id,
+                  killerName: player.name,
+                  killedName: otherPlayer.name,
+                  gangSize: player.gang.length
+                });
+              }
             }
           });
           // Nuke also kills AI enemies
@@ -869,6 +889,14 @@ setInterval(() => {
               player.score += 50;
               player.kills++;
               player.totalKills++;
+              io.emit('player_killed', {
+                killedId: ai.id,
+                killerId: player.id,
+                killerName: player.name,
+                killedName: ai.name,
+                gangSize: player.gang.length,
+                wasAI: true
+              });
             }
           });
         }
