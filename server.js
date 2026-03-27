@@ -60,6 +60,175 @@ const SKINS = {
   void: { name: 'Void', color: '#8800ff', kills: 500 }
 };
 
+// ============ AI CONFIG ============
+const AI_COUNT = 8; // Number of AI bots in the world
+const AI_NAMES = ['CIPHER', 'GHOST', 'VIPER', 'PHANTOM', 'REAPER', 'NOVA', 'STATIC', 'GLITCH',
+  'HAVOC', 'BLITZ', 'WRAITH', 'DAEMON', 'SURGE', 'ECHO', 'ZERO', 'FLUX'];
+const AI_SKINS = ['crimson', 'azure', 'gold', 'purple', 'toxic', 'inferno'];
+let aiIdCounter = 0;
+
+// AI Enemy class
+class AIEnemy {
+  constructor() {
+    this.id = 'ai_' + aiIdCounter++;
+    this.name = AI_NAMES[Math.floor(Math.random() * AI_NAMES.length)];
+    this.x = Math.random() * WORLD_SIZE - WORLD_SIZE / 2;
+    this.y = Math.random() * WORLD_SIZE - WORLD_SIZE / 2;
+    this.vx = 0;
+    this.vy = 0;
+    this.angle = Math.random() * Math.PI * 2;
+    this.health = 60;
+    this.maxHealth = 60;
+    this.speed = 3;
+    this.damage = 10;
+    this.alive = true;
+    this.skin = AI_SKINS[Math.floor(Math.random() * AI_SKINS.length)];
+    this.isAI = true;
+
+    // AI behavior
+    this.targetAngle = this.angle;
+    this.changeTimer = 0;
+    this.shootTimer = 0;
+    this.state = 'roam'; // roam, chase, flee
+    this.targetId = null;
+  }
+
+  update(dt) {
+    if (!this.alive) return;
+
+    this.changeTimer--;
+    this.shootTimer--;
+
+    // Find nearest player
+    let nearestPlayer = null;
+    let nearestDist = Infinity;
+    players.forEach(p => {
+      if (!p.alive || p.cloaked) return;
+      const dx = p.x - this.x;
+      const dy = p.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestPlayer = p;
+      }
+    });
+
+    // State transitions
+    if (nearestPlayer && nearestDist < 600) {
+      if (this.health < 20) {
+        this.state = 'flee';
+        this.targetAngle = Math.atan2(this.y - nearestPlayer.y, this.x - nearestPlayer.x);
+      } else {
+        this.state = 'chase';
+        this.targetAngle = Math.atan2(nearestPlayer.y - this.y, nearestPlayer.x - this.x);
+        this.targetId = nearestPlayer.id;
+      }
+    } else {
+      this.state = 'roam';
+    }
+
+    // Roaming: pick random direction periodically
+    if (this.state === 'roam' && this.changeTimer <= 0) {
+      this.targetAngle = Math.random() * Math.PI * 2;
+      this.changeTimer = Math.floor(Math.random() * 180) + 60; // 1-4 seconds
+    }
+
+    // Smooth angle turning
+    let angleDiff = this.targetAngle - this.angle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    this.angle += angleDiff * 0.05;
+
+    // Move
+    const moveSpeed = this.state === 'flee' ? this.speed * 1.3 : this.speed;
+    this.vx = Math.cos(this.angle) * moveSpeed;
+    this.vy = Math.sin(this.angle) * moveSpeed;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+
+    // Keep in bounds
+    const margin = WORLD_SIZE / 2;
+    if (this.x < -margin || this.x > margin || this.y < -margin || this.y > margin) {
+      this.x = Math.max(-margin, Math.min(margin, this.x));
+      this.y = Math.max(-margin, Math.min(margin, this.y));
+      this.targetAngle = Math.atan2(-this.y, -this.x); // Turn toward center
+    }
+
+    // Shoot at nearby players
+    if (this.state === 'chase' && nearestPlayer && nearestDist < 500 && this.shootTimer <= 0) {
+      this.shootTimer = 30; // ~0.5 second between shots
+      const shootAngle = Math.atan2(nearestPlayer.y - this.y, nearestPlayer.x - this.x);
+      const bullet = new Bullet(bulletIdCounter++, this.id, this.x, this.y,
+        Math.cos(shootAngle) * 18, Math.sin(shootAngle) * 18, 'default');
+      bullet.damage = this.damage;
+      bullets.set(bullet.id, bullet);
+    }
+  }
+
+  takeDamage(damage, killerId) {
+    if (!this.alive) return null;
+    this.health -= damage;
+    if (this.health <= 0) {
+      this.alive = false;
+      return killerId;
+    }
+    return null;
+  }
+
+  serialize() {
+    return {
+      id: this.id,
+      name: this.name,
+      x: this.x,
+      y: this.y,
+      angle: this.angle,
+      health: this.health,
+      maxHealth: this.maxHealth,
+      alive: this.alive,
+      skin: this.skin,
+      isAI: true,
+      score: 0, kills: 0, totalKills: 0, powerLevel: 1,
+      shield: 0, armor: 0, xp: 0, multishot: 1,
+      invincible: 0, megaDamage: 0, gang: [],
+      weapon: 'default', weaponAmmo: Infinity,
+      ability: 'dash', abilityCooldown: 0, abilityActive: 0,
+      cloaked: false, empSlowed: 0
+    };
+  }
+}
+
+// AI enemies collection
+const aiEnemies = new Map();
+
+function spawnAIEnemy() {
+  const ai = new AIEnemy();
+  aiEnemies.set(ai.id, ai);
+}
+
+// Spawn initial AI enemies
+for (let i = 0; i < AI_COUNT; i++) {
+  spawnAIEnemy();
+}
+
+// Respawn dead AI after a delay
+function respawnDeadAI() {
+  if (aiEnemies.size < AI_COUNT) {
+    const needed = AI_COUNT - aiEnemies.size;
+    for (let i = 0; i < needed; i++) {
+      spawnAIEnemy();
+    }
+  }
+}
+
+// Drop a powerup where an AI died
+function dropAILoot(x, y) {
+  const lootTypes = ['health_medium', 'energy', 'shield', 'speed', 'firerate', 'damage',
+    'weapon_shotgun', 'weapon_sniper', 'weapon_laser', 'weapon_homing'];
+  const type = lootTypes[Math.floor(Math.random() * lootTypes.length)];
+  const powerup = new Powerup(powerupIdCounter++, x, y, type);
+  powerups.set(powerup.id, powerup);
+}
+
 // Player class
 class Player {
   constructor(id, name, skin, ability) {
@@ -97,9 +266,11 @@ class Player {
     // SKIN SYSTEM
     this.skin = (skin && SKINS[skin]) ? skin : 'default';
 
-    // WEAPON SYSTEM
+    // WEAPON SYSTEM - inventory of collected weapons
     this.weapon = 'default';
     this.weaponAmmo = Infinity;
+    this.weaponInventory = [{ type: 'default', ammo: Infinity }]; // Always have blaster
+    this.weaponIndex = 0;
 
     // ABILITY SYSTEM
     this.ability = (ability && ABILITIES[ability]) ? ability : 'dash';
@@ -215,6 +386,8 @@ class Player {
     this.gangTrail = [];
     this.weapon = 'default';
     this.weaponAmmo = Infinity;
+    this.weaponInventory = [{ type: 'default', ammo: Infinity }];
+    this.weaponIndex = 0;
     this.cloaked = false;
     this.abilityActive = 0;
     this.empSlowed = 0;
@@ -231,8 +404,25 @@ class Player {
 
   equipWeapon(weaponType) {
     if (!WEAPONS[weaponType]) return;
+    // Check if we already have this weapon — refill ammo
+    const existing = this.weaponInventory.find(w => w.type === weaponType);
+    if (existing) {
+      existing.ammo = WEAPONS[weaponType].ammo;
+    } else {
+      this.weaponInventory.push({ type: weaponType, ammo: WEAPONS[weaponType].ammo });
+    }
+    // Switch to the new weapon
+    this.weaponIndex = this.weaponInventory.findIndex(w => w.type === weaponType);
     this.weapon = weaponType;
     this.weaponAmmo = WEAPONS[weaponType].ammo;
+  }
+
+  switchWeapon(direction) {
+    if (this.weaponInventory.length <= 1) return;
+    this.weaponIndex = (this.weaponIndex + direction + this.weaponInventory.length) % this.weaponInventory.length;
+    const slot = this.weaponInventory[this.weaponIndex];
+    this.weapon = slot.type;
+    this.weaponAmmo = slot.ammo;
   }
 
   useAbility() {
@@ -363,6 +553,8 @@ class Player {
       skin: this.skin,
       weapon: this.weapon,
       weaponAmmo: this.weaponAmmo,
+      weaponInventory: this.weaponInventory,
+      weaponIndex: this.weaponIndex,
       ability: this.ability,
       abilityCooldown: this.abilityCooldown,
       abilityActive: this.abilityActive,
@@ -389,12 +581,13 @@ class Bullet {
   }
 
   update(dt) {
-    // Homing behavior: steer toward nearest enemy
+    // Homing behavior: steer toward nearest enemy (players + AI)
     if (this.homing) {
       let nearestDist = Infinity;
       let nearestPlayer = null;
-      players.forEach(p => {
-        if (!p.alive || p.id === this.playerId || p.cloaked) return;
+      const checkTarget = (p) => {
+        if (!p.alive || p.id === this.playerId) return;
+        if (p.cloaked) return;
         const dx = p.x - this.x;
         const dy = p.y - this.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
@@ -402,7 +595,9 @@ class Bullet {
           nearestDist = dist;
           nearestPlayer = p;
         }
-      });
+      };
+      players.forEach(checkTarget);
+      aiEnemies.forEach(checkTarget);
 
       if (nearestPlayer) {
         const targetAngle = Math.atan2(nearestPlayer.y - this.y, nearestPlayer.x - this.x);
@@ -533,6 +728,9 @@ setInterval(() => {
   // Update all players
   players.forEach(player => player.update(dt));
 
+  // Update all AI enemies
+  aiEnemies.forEach(ai => ai.update(dt));
+
   // Update all bullets
   bullets.forEach((bullet, id) => {
     const alive = bullet.update(dt);
@@ -544,7 +742,6 @@ setInterval(() => {
     // Check bullet collision with players
     players.forEach(player => {
       if (!player.alive || player.id === bullet.playerId) return;
-      // Can't hit cloaked players (except with splash/nuke)
       if (player.cloaked) return;
 
       const dx = bullet.x - player.x;
@@ -569,6 +766,43 @@ setInterval(() => {
               killerId: killerId,
               killerName: killer.name,
               gangSize: killer.gang.length
+            });
+          }
+        }
+      }
+    });
+
+    // Check bullet collision with AI enemies
+    aiEnemies.forEach(ai => {
+      if (!ai.alive || ai.id === bullet.playerId) return;
+
+      const dx = bullet.x - ai.x;
+      const dy = bullet.y - ai.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 30) {
+        const killerId = ai.takeDamage(bullet.damage, bullet.playerId);
+        bullets.delete(id);
+
+        if (killerId) {
+          // Drop loot at AI death location
+          dropAILoot(ai.x, ai.y);
+          aiEnemies.delete(ai.id);
+
+          // Award killer (if it's a player)
+          const killer = players.get(killerId);
+          if (killer) {
+            killer.score += 50;
+            killer.kills++;
+            killer.totalKills++;
+
+            io.emit('player_killed', {
+              killedId: ai.id,
+              killerId: killerId,
+              killerName: killer.name,
+              killedName: ai.name,
+              gangSize: killer.gang.length,
+              wasAI: true
             });
           }
         }
@@ -615,9 +849,13 @@ setInterval(() => {
     });
   });
 
-  // Broadcast game state
+  // Broadcast game state (include AI enemies as players)
+  const allPlayers = [
+    ...Array.from(players.values()).map(p => p.serialize()),
+    ...Array.from(aiEnemies.values()).map(a => a.serialize())
+  ];
   io.emit('game_state', {
-    players: Array.from(players.values()).map(p => p.serialize()),
+    players: allPlayers,
     bullets: Array.from(bullets.values()).map(b => b.serialize()),
     powerups: Array.from(powerups.values()).map(p => p.serialize())
   });
@@ -633,6 +871,11 @@ setInterval(() => {
     }
   }
 }, POWERUP_SPAWN_INTERVAL);
+
+// Respawn AI enemies every 5 seconds
+setInterval(() => {
+  respawnDeadAI();
+}, 5000);
 
 // Socket.io events
 io.on('connection', (socket) => {
@@ -712,12 +955,18 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Consume ammo
+    // Consume ammo and sync with inventory
     if (player.weaponAmmo !== Infinity) {
       player.weaponAmmo--;
+      const slot = player.weaponInventory[player.weaponIndex];
+      if (slot) slot.ammo = player.weaponAmmo;
       if (player.weaponAmmo <= 0) {
-        player.weapon = 'default';
-        player.weaponAmmo = Infinity;
+        // Remove empty weapon from inventory
+        player.weaponInventory.splice(player.weaponIndex, 1);
+        player.weaponIndex = 0;
+        const fallback = player.weaponInventory[0] || { type: 'default', ammo: Infinity };
+        player.weapon = fallback.type;
+        player.weaponAmmo = fallback.ammo;
       }
     }
 
@@ -760,6 +1009,13 @@ io.on('connection', (socket) => {
       y: result.y || player.y,
       radius: result.radius || 0
     });
+  });
+
+  socket.on('switch_weapon', (data) => {
+    const player = players.get(socket.id);
+    if (!player || !player.alive) return;
+    const dir = data.direction === 'prev' ? -1 : 1;
+    player.switchWeapon(dir);
   });
 
   socket.on('select_skin', (data) => {

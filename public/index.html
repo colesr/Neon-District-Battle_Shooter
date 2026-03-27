@@ -262,6 +262,87 @@
       color:#ff2d78;
     }
 
+    /* Pause Menu */
+    #pause-screen {
+      position:absolute;
+      inset:0;
+      background:rgba(4,1,10,0.92);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      z-index:200;
+      backdrop-filter:blur(5px);
+    }
+    #pause-screen.show { display:flex; }
+    .pause-title {
+      font-size:42px;
+      font-weight:900;
+      color:#00ffcc;
+      text-shadow:0 0 40px #00ffcc;
+      letter-spacing:0.2em;
+      margin-bottom:30px;
+    }
+    .pause-btn {
+      font-family:'Orbitron',monospace;
+      font-size:14px;
+      font-weight:700;
+      padding:12px 40px;
+      background:transparent;
+      border:2px solid #00ffcc;
+      color:#00ffcc;
+      cursor:pointer;
+      letter-spacing:0.15em;
+      margin-bottom:12px;
+      width:250px;
+      transition:all 0.2s;
+    }
+    .pause-btn:hover {
+      background:rgba(0,255,204,0.15);
+      transform:scale(1.05);
+      box-shadow:0 0 20px rgba(0,255,204,0.3);
+    }
+    .pause-controls {
+      font-size:10px;
+      color:rgba(0,255,204,0.5);
+      margin-top:20px;
+      text-align:center;
+      line-height:2;
+      letter-spacing:0.08em;
+    }
+
+    /* Weapon Inventory Bar */
+    #weapon-bar {
+      position:absolute;
+      bottom:100px;
+      left:50%;
+      transform:translateX(-50%);
+      display:flex;
+      gap:5px;
+      z-index:10;
+    }
+    .weapon-slot {
+      width:50px;
+      height:40px;
+      border:2px solid rgba(0,255,204,0.3);
+      border-radius:3px;
+      background:rgba(4,1,10,0.7);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      font-size:8px;
+      color:rgba(0,255,204,0.6);
+      letter-spacing:0.05em;
+    }
+    .weapon-slot.active {
+      border-color:#00ffcc;
+      box-shadow:0 0 10px rgba(0,255,204,0.4);
+      color:#00ffcc;
+    }
+    .weapon-slot .wslot-name { font-weight:700; }
+    .weapon-slot .wslot-ammo { font-size:7px; color:#ffaa00; }
+
     /* Mini-Map */
     #minimap {
       position:absolute;
@@ -440,6 +521,21 @@
     <button id="respawn-btn">⚡ RESPAWN</button>
   </div>
   
+  <!-- Pause Screen -->
+  <div id="pause-screen">
+    <div class="pause-title">PAUSED</div>
+    <button class="pause-btn" id="resume-btn">RESUME</button>
+    <button class="pause-btn" id="quit-btn">QUIT TO MENU</button>
+    <div class="pause-controls">
+      WASD - MOVE &nbsp;|&nbsp; MOUSE - AIM &nbsp;|&nbsp; CLICK - SHOOT<br>
+      SPACE - ABILITY &nbsp;|&nbsp; Q/E or SCROLL - SWITCH WEAPON<br>
+      ESC - PAUSE
+    </div>
+  </div>
+
+  <!-- Weapon Inventory Bar -->
+  <div id="weapon-bar"></div>
+
   <!-- Mini-Map -->
   <div id="minimap">
     <canvas id="minimap-canvas" width="180" height="180"></canvas>
@@ -557,6 +653,21 @@ for (let i = 0; i < 8; i++) {
 const keys = {};
 let mouseX = W/2, mouseY = H/2;
 let shooting = false;
+let paused = false;
+
+// Pause menu buttons
+document.getElementById('resume-btn').addEventListener('click', () => {
+  paused = false;
+  document.getElementById('pause-screen').classList.remove('show');
+});
+document.getElementById('quit-btn').addEventListener('click', () => {
+  paused = false;
+  document.getElementById('pause-screen').classList.remove('show');
+  if (socket) socket.disconnect();
+  socket = null;
+  myPlayerId = null;
+  document.getElementById('join-screen').classList.remove('hidden');
+});
 
 // Join game
 document.getElementById('join-btn').addEventListener('click', joinGame);
@@ -648,6 +759,25 @@ function connectToServer(playerName) {
       const weaponNames = { default: 'Blaster', shotgun: 'Shotgun', sniper: 'Sniper', laser: 'Laser', homing: 'Homing' };
       document.getElementById('weapon-display').textContent = weaponNames[me.weapon] || 'Blaster';
       document.getElementById('ammo-display').textContent = me.weaponAmmo === null || me.weapon === 'default' ? '' : `[${me.weaponAmmo}]`;
+
+      // Update weapon inventory bar
+      const weaponBar = document.getElementById('weapon-bar');
+      const inv = me.weaponInventory || [{ type: 'default', ammo: Infinity }];
+      const activeIdx = me.weaponIndex || 0;
+      if (inv.length !== weaponBar.childElementCount || weaponBar.dataset.hash !== JSON.stringify(inv.map(w => w.type + w.ammo))) {
+        weaponBar.dataset.hash = JSON.stringify(inv.map(w => w.type + w.ammo));
+        weaponBar.innerHTML = inv.map((w, i) => {
+          const name = weaponNames[w.type] || w.type;
+          const ammoText = w.ammo === Infinity ? '' : w.ammo;
+          const active = i === activeIdx ? ' active' : '';
+          return `<div class="weapon-slot${active}"><span class="wslot-name">${name}</span>${ammoText ? `<span class="wslot-ammo">${ammoText}</span>` : ''}</div>`;
+        }).join('');
+      } else {
+        // Just update active state
+        weaponBar.querySelectorAll('.weapon-slot').forEach((el, i) => {
+          el.classList.toggle('active', i === activeIdx);
+        });
+      }
 
       // Update ability cooldown bar
       const abilityNames = { dash: 'DASH', emp: 'EMP', cloak: 'CLOAK' };
@@ -814,13 +944,38 @@ function showPowerupNotification(text) {
 
 // Input handling
 window.addEventListener('keydown', (e) => {
+  // ESC toggles pause
+  if (e.key === 'Escape' && socket && myPlayerId) {
+    paused = !paused;
+    document.getElementById('pause-screen').classList.toggle('show', paused);
+    shooting = false;
+    return;
+  }
+  // Don't process game input while paused
+  if (paused) return;
+
   keys[e.key.toLowerCase()] = true;
+
   // Ability on Space
   if (e.code === 'Space' && socket && myPlayerId) {
     e.preventDefault();
     socket.emit('use_ability');
   }
+  // Weapon switching: Q = prev, E = next
+  if (e.key.toLowerCase() === 'q' && socket && myPlayerId) {
+    socket.emit('switch_weapon', { direction: 'prev' });
+  }
+  if (e.key.toLowerCase() === 'e' && socket && myPlayerId) {
+    socket.emit('switch_weapon', { direction: 'next' });
+  }
 });
+
+// Weapon switching with scroll wheel
+canvas.addEventListener('wheel', (e) => {
+  if (!socket || !myPlayerId || paused) return;
+  e.preventDefault();
+  socket.emit('switch_weapon', { direction: e.deltaY > 0 ? 'next' : 'prev' });
+}, { passive: false });
 
 window.addEventListener('keyup', (e) => {
   keys[e.key.toLowerCase()] = false;
@@ -844,7 +999,7 @@ canvas.addEventListener('mouseup', () => {
 
 // Send input to server
 setInterval(() => {
-  if (!socket || !myPlayerId) return;
+  if (!socket || !myPlayerId || paused) return;
   
   // Calculate velocity from WASD
   let vx = 0, vy = 0;
@@ -1221,11 +1376,11 @@ function render() {
     
     ctx.restore();
     
-    // Name tag
+    // Name tag (AI enemies get a [BOT] prefix)
     ctx.fillStyle = color;
     ctx.font = '11px Orbitron';
     ctx.textAlign = 'center';
-    ctx.fillText(p.name, p.x, p.y - size - 10);
+    ctx.fillText(p.isAI ? '[BOT] ' + p.name : p.name, p.x, p.y - size - 10);
     
     // Health bar
     const barWidth = 50;
@@ -1325,12 +1480,11 @@ function drawMinimap() {
       mctx.lineWidth = 1;
       mctx.strokeRect(mx - viewW/2, my - viewH/2, viewW, viewH);
     } else {
-      // Enemies: red dots
-      const skinDef = SKINS[p.skin] || SKINS.default;
-      const dotColor = skinDef.color || '#ff2d78';
+      // Enemies: colored dots, AI bots are yellow-ish
+      const dotColor = p.isAI ? '#ffcc00' : (SKINS[p.skin] || SKINS.default).color || '#ff2d78';
       mctx.fillStyle = dotColor;
       mctx.beginPath();
-      mctx.arc(mx, my, 2, 0, Math.PI * 2);
+      mctx.arc(mx, my, p.isAI ? 1.5 : 2, 0, Math.PI * 2);
       mctx.fill();
     }
   });
@@ -1399,7 +1553,8 @@ function updateLeaderboard() {
 function addKillMessage(data) {
   const msg = document.createElement('div');
   msg.className = 'kill-msg';
-  msg.textContent = `${data.killerName} eliminated a player`;
+  const victimName = data.wasAI ? data.killedName : 'a player';
+  msg.textContent = `${data.killerName} eliminated ${victimName}`;
   document.getElementById('kill-feed').appendChild(msg);
   
   setTimeout(() => msg.remove(), 3000);
