@@ -300,12 +300,12 @@ class Player {
 
     // Update gang trail
     this.gangTrail.push({ x: this.x, y: this.y, angle: this.angle });
-    const maxTrailLength = this.gang.length * 3 + 50;
+    const maxTrailLength = this.gang.length * 25 + 50;
     if (this.gangTrail.length > maxTrailLength) {
       this.gangTrail.shift();
     }
 
-    // Update gang member positions
+    // Update gang member positions (follow trail) and auto-shoot
     const spacing = 40;
     this.gang.forEach((member, i) => {
       const targetIndex = Math.floor((i + 1) * spacing / 2);
@@ -313,7 +313,48 @@ class Player {
         const target = this.gangTrail[this.gangTrail.length - 1 - targetIndex];
         member.x = target.x;
         member.y = target.y;
-        member.angle = target.angle;
+      }
+
+      // Find nearest enemy to this gang member
+      let nearestEnemy = null;
+      let nearestDist = 500; // max range
+      players.forEach(p => {
+        if (!p.alive || p.id === this.id || p.cloaked) return;
+        const dx = p.x - member.x;
+        const dy = p.y - member.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestEnemy = p;
+        }
+      });
+      aiEnemies.forEach(ai => {
+        if (!ai.alive) return;
+        const dx = ai.x - member.x;
+        const dy = ai.y - member.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestEnemy = ai;
+        }
+      });
+
+      // Aim at nearest enemy, or follow player angle
+      if (nearestEnemy) {
+        member.angle = Math.atan2(nearestEnemy.y - member.y, nearestEnemy.x - member.x);
+      } else {
+        member.angle = this.angle;
+      }
+
+      // Auto-fire at enemies
+      if (member.shootTimer > 0) member.shootTimer--;
+      if (nearestEnemy && member.shootTimer <= 0) {
+        member.shootTimer = 20; // ~3 shots/sec at 60 tick
+        const shootAngle = member.angle;
+        const gangBullet = new Bullet(bulletIdCounter++, this.id, member.x, member.y,
+          Math.cos(shootAngle) * 20, Math.sin(shootAngle) * 20, 'default');
+        gangBullet.damage = this.megaDamage > 0 ? this.damage * 3 : this.damage;
+        bullets.set(gangBullet.id, gangBullet);
       }
     });
 
@@ -342,7 +383,7 @@ class Player {
       x: this.x,
       y: this.y,
       angle: this.angle,
-      lastShot: 0
+      shootTimer: 0
     });
   }
 
@@ -824,6 +865,8 @@ setInterval(() => {
               killer.score += 50;
               killer.kills++;
               killer.totalKills++;
+              killer.powerUp();
+              killer.addGangMember();
 
               io.emit('player_killed', {
                 killedId: ai.id,
@@ -1034,15 +1077,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Gang shoots in same direction
-    if (player.gang && player.gang.length > 0) {
-      player.gang.forEach((member) => {
-        const gangBullet = new Bullet(bulletIdCounter++, socket.id, member.x, member.y,
-          Math.cos(angle) * 20, Math.sin(angle) * 20, 'default');
-        gangBullet.damage = player.megaDamage > 0 ? player.damage * 3 : player.damage;
-        bullets.set(gangBullet.id, gangBullet);
-      });
-    }
+    // Gang members auto-fire independently in player.update() — no manual trigger needed
   });
 
   socket.on('use_ability', () => {
