@@ -306,7 +306,7 @@ class Player {
     }
 
     // Update gang member positions (follow trail) and auto-shoot
-    const spacing = 40;
+    const spacing = 30;
     this.gang.forEach((member, i) => {
       const targetIndex = Math.floor((i + 1) * spacing / 2);
       if (targetIndex < this.gangTrail.length) {
@@ -317,7 +317,7 @@ class Player {
 
       // Find nearest enemy to this gang member
       let nearestEnemy = null;
-      let nearestDist = 500; // max range
+      let nearestDist = 800; // max targeting range
       players.forEach(p => {
         if (!p.alive || p.id === this.id || p.cloaked) return;
         const dx = p.x - member.x;
@@ -339,17 +339,18 @@ class Player {
         }
       });
 
-      // Aim at nearest enemy, or follow player angle
-      if (nearestEnemy) {
-        member.angle = Math.atan2(nearestEnemy.y - member.y, nearestEnemy.x - member.x);
-      } else {
+      // Also target whatever the player is aiming at (use player angle as fallback target)
+      if (!nearestEnemy) {
+        // Shoot in player's facing direction if no enemy found
         member.angle = this.angle;
+      } else {
+        member.angle = Math.atan2(nearestEnemy.y - member.y, nearestEnemy.x - member.x);
       }
 
-      // Auto-fire at enemies
-      if (member.shootTimer > 0) member.shootTimer--;
-      if (nearestEnemy && member.shootTimer <= 0) {
-        member.shootTimer = 20; // ~3 shots/sec at 60 tick
+      // Auto-fire — always shoot when cooldown is ready
+      if (member.shootTimer > 0) member.shootTimer -= dt;
+      if (member.shootTimer <= 0) {
+        member.shootTimer = 15; // ~4 shots/sec at 60 tick
         const shootAngle = member.angle;
         const gangBullet = new Bullet(bulletIdCounter++, this.id, member.x, member.y,
           Math.cos(shootAngle) * 20, Math.sin(shootAngle) * 20, 'default');
