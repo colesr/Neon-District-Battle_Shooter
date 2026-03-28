@@ -61,7 +61,7 @@ const SKINS = {
 };
 
 // ============ AI CONFIG ============
-const AI_COUNT = 8; // Number of AI bots in the world
+const AI_COUNT = 30; // Number of AI bots in the world
 const AI_NAMES = ['CIPHER', 'GHOST', 'VIPER', 'PHANTOM', 'REAPER', 'NOVA', 'STATIC', 'GLITCH',
   'HAVOC', 'BLITZ', 'WRAITH', 'DAEMON', 'SURGE', 'ECHO', 'ZERO', 'FLUX'];
 const AI_SKINS = ['crimson', 'azure', 'gold', 'purple', 'toxic', 'inferno'];
