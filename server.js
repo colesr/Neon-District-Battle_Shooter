@@ -339,24 +339,15 @@ class Player {
         }
       });
 
-      // Also target whatever the player is aiming at (use player angle as fallback target)
+      // Aim at nearest enemy, or follow player angle
       if (!nearestEnemy) {
-        // Shoot in player's facing direction if no enemy found
         member.angle = this.angle;
       } else {
         member.angle = Math.atan2(nearestEnemy.y - member.y, nearestEnemy.x - member.x);
       }
 
-      // Auto-fire — always shoot when cooldown is ready
+      // Shoot timer cooldown (gang members fire when player fires, handled in shoot event)
       if (member.shootTimer > 0) member.shootTimer -= dt;
-      if (member.shootTimer <= 0) {
-        member.shootTimer = 15; // ~4 shots/sec at 60 tick
-        const shootAngle = member.angle;
-        const gangBullet = new Bullet(bulletIdCounter++, this.id, member.x, member.y,
-          Math.cos(shootAngle) * 20, Math.sin(shootAngle) * 20, 'default');
-        gangBullet.damage = this.megaDamage > 0 ? this.damage * 3 : this.damage;
-        bullets.set(gangBullet.id, gangBullet);
-      }
     });
 
     // Decay temporary effects
@@ -1078,7 +1069,18 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Gang members auto-fire independently in player.update() — no manual trigger needed
+    // Gang members fire when player fires, aiming at their own nearest target
+    if (player.gang && player.gang.length > 0) {
+      player.gang.forEach((member) => {
+        if (member.shootTimer > 0) return; // on cooldown
+        member.shootTimer = 10; // brief cooldown to prevent bullet spam
+        const shootAngle = member.angle; // pre-calculated in update() to face nearest enemy
+        const gangBullet = new Bullet(bulletIdCounter++, socket.id, member.x, member.y,
+          Math.cos(shootAngle) * 20, Math.sin(shootAngle) * 20, 'default');
+        gangBullet.damage = player.megaDamage > 0 ? player.damage * 3 : player.damage;
+        bullets.set(gangBullet.id, gangBullet);
+      });
+    }
   });
 
   socket.on('use_ability', () => {
